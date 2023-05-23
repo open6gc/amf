@@ -1,15 +1,92 @@
 package producer
 
 import (
+	"bytes"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/free5gc/amf/internal/context"
 	"github.com/free5gc/amf/internal/logger"
+	"github.com/free5gc/openapi"
 	"github.com/free5gc/openapi/models"
 	"github.com/free5gc/util/httpwrapper"
 )
+
+func SendAMFEventNotification(ue *context.AmfUe, eventType models.AmfEventType) (ok bool) {
+	logger.EeLog.Infoln("[BRASIL6G] Handle Send AMF Event Notification for event:", eventType, "and UE ",ue)
+
+	amfSelf := context.AMF_Self()
+
+	amfSelf.EventSubscriptions.Range(func(key, value interface{}) bool {
+		var subscriptionId = key.(string)
+		var contextSubscription = value.(*context.AMFContextEventSubscription)
+		var reportlist []models.AmfEventReport
+
+		logger.EeLog.Infoln("[BRASIL6G] Checking event subscription id ", subscriptionId)
+		_, subscriptionFound := ue.EventSubscriptionsInfo[subscriptionId]
+
+		//edge-case: register a new AmfUeEventSubscription if missing and EventSubsciption is AnyUE
+		if !subscriptionFound && contextSubscription.EventSubscription.AnyUE{ 
+			ueEventSubscription := context.AmfUeEventSubscription{}
+			ueEventSubscription.EventSubscription = &contextSubscription.EventSubscription
+			ueEventSubscription.Timestamp = time.Now().UTC()
+
+			if contextSubscription.EventSubscription.Options != nil && contextSubscription.EventSubscription.Options.Trigger == models.AmfEventTrigger_CONTINUOUS {
+				ueEventSubscription.RemainReports = new(int32)
+				*ueEventSubscription.RemainReports = contextSubscription.EventSubscription.Options.MaxReports
+			}
+
+			ue.EventSubscriptionsInfo[subscriptionId] = new(context.AmfUeEventSubscription)
+       		*ue.EventSubscriptionsInfo[subscriptionId] = ueEventSubscription
+	       	contextSubscription.UeSupiList = append(contextSubscription.UeSupiList, ue.Supi)
+		}
+
+		logger.EeLog.Infoln("[BRASIL6G] Filtering event types", contextSubscription.EventSubscription.EventList)
+		for _, event := range *contextSubscription.EventSubscription.EventList {
+			if event.Type == eventType {
+				logger.EeLog.Infoln("[BRASIL6G] Generating report with eventType", eventType, "for subscription id ", subscriptionId)
+				report, ok := NewAmfEventReport(ue, eventType, subscriptionId)
+				if ok {
+					reportlist = append(reportlist, report)
+				}
+			}
+		
+		}
+
+		logger.EeLog.Infoln("[BRASIL6G] Sending report with subscription id", subscriptionId, ", eventType ", eventType, ", UE", ue,", list: ", reportlist)
+		var notification = new(models.AmfEventNotification)
+		notification.NotifyCorrelationId = subscriptionId
+		notification.ReportList = reportlist
+
+		body, err := openapi.Serialize(notification, "application/json")
+		if err != nil {
+			logger.EeLog.Errorf("Error deserializing a AmfEventNotification. Error: %+v\n", err)
+			return false
+		} 
+		
+		r, err := http.NewRequest("POST",contextSubscription.EventSubscription.EventNotifyUri, bytes.NewBuffer(body))
+		if err != nil {
+			logger.EeLog.Errorf("Error creating the http.Request for sending a AmfEventNotification. Error: %+v\n", err)
+			return false
+		}
+		
+		r.Header.Add("Content-Type", "application/json")
+
+		client := &http.Client{}
+		res, err := client.Do(r)
+		if err != nil {
+			logger.EeLog.Errorf("Error sending the AmfEventNotification. Error: %+v\n", err)
+			return false
+		}
+
+		logger.EeLog.Infoln("[BRASIL6G] Notification sent to URI",contextSubscription.EventSubscription.EventNotifyUri, "with NotifyCorrelationId", subscriptionId, ". HTTP Status:", res.StatusCode)
+
+		return true
+	})
+	
+	return true
+}
 
 func HandleCreateAMFEventSubscription(request *httpwrapper.Request) *httpwrapper.Response {
 	createEventSubscription := request.Body.(models.AmfCreateEventSubscription)

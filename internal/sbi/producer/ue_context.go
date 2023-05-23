@@ -122,6 +122,8 @@ func CreateUEContextProcedure(ueContextID string, createUeContextRequest models.
 	//response.PcfReselectedInd = false // TODO:When  Target AMF selects a nw PCF for AM policy, set the flag to true.
 	//
 
+	SendAMFEventNotification(ue, models.AmfEventType_REGISTRATION_STATE_REPORT)
+
 	// return httpwrapper.NewResponse(http.StatusCreated, nil, createUeContextResponse)
 	return createUeContextResponse, nil
 }
@@ -513,6 +515,8 @@ func RegistrationStatusUpdateProcedure(ueContextID string, ueRegStatusUpdateReqD
 		// NOT_TRANSFERRED
 		logger.CommLog.Debug("[AMF] RegistrationStatusUpdate: NOT_TRANSFERRED")
 	}
+
+	SendAMFEventNotification(ue, models.AmfEventType_REGISTRATION_STATE_REPORT)
 
 	ueRegStatusUpdateRspData.RegStatusTransferComplete = true
 	return ueRegStatusUpdateRspData, nil
