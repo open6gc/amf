@@ -21,6 +21,7 @@ import (
 	ngap_message "github.com/free5gc/amf/internal/ngap/message"
 	"github.com/free5gc/amf/internal/sbi/consumer"
 	"github.com/free5gc/amf/internal/sbi/producer/callback"
+	"github.com/free5gc/amf/internal/sbi/producer/notify"
 	"github.com/free5gc/amf/internal/util"
 	"github.com/free5gc/nas"
 	"github.com/free5gc/nas/nasConvert"
@@ -528,6 +529,8 @@ func HandleRegistrationRequest(ue *context.AmfUe, anType models.AccessType, proc
 			ue.SecurityContextAvailable = false     // need to start authentication procedure later
 		}
 	}
+
+	notify.SendAMFEventNotification(ue, models.AmfEventType_REGISTRATION_STATE_REPORT)
 	return nil
 }
 
